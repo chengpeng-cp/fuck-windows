@@ -11,7 +11,7 @@
 ## 快速开始
 
 ```powershell
-git clone https://github.com/<你的用户名>/fuck-windows.git
+git clone https://github.com/chengpeng-cp/fuck-windows.git
 cd fuck-windows
 
 # 1. 先看报告，不做任何更改（强烈建议第一次这样跑）
