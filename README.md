@@ -11,7 +11,11 @@
 ## 快速开始
 
 ```powershell
+# github 上 clone 项目
 git clone https://github.com/chengpeng-cp/fuck-windows.git
+# 如果网络问题无法使用github,可以从gitee clone项目
+git clone https://gitee.com/CP-chengpeng/fuck-windows.git
+
 cd fuck-windows
 
 # 1. 先看报告，不做任何更改（强烈建议第一次这样跑）
