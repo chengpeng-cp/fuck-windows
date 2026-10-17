@@ -17,8 +17,12 @@ function Enable-FWPUAProtection {
 }
 
 function Start-FWQuickScan {
-    Start-Process powershell -ArgumentList '-NoProfile','-WindowStyle','Hidden','-Command','Start-MpScan -ScanType QuickScan' -WindowStyle Hidden
-    Write-Log '已在后台启动 Defender 快速扫描' 'OK'
+    try {
+        Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-WindowStyle', 'Hidden', '-Command', 'Start-MpScan -ScanType QuickScan') -WindowStyle Hidden -ErrorAction Stop
+        Write-Log '已在后台启动 Defender 快速扫描' 'OK'
+    } catch {
+        Write-Log ("后台扫描启动失败: {0}" -f $_.Exception.Message) 'WARN'
+    }
 }
 
 Export-ModuleMember -Function '*'

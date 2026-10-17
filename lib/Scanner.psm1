@@ -61,7 +61,7 @@ function Find-FWRogueServices {
 
     # 内核驱动：Type=1，无论运行与否都检查注册表
     foreach ($key in (Get-ChildItem 'HKLM:\SYSTEM\CurrentControlSet\Services' -ErrorAction SilentlyContinue)) {
-        $p = Get-ItemProperty $key.PSPath -ErrorAction SilentlyContinue
+        $p = Get-ItemProperty -LiteralPath $key.PSPath -ErrorAction SilentlyContinue
         if ($p.Type -ne 1 -or -not $p.ImagePath) { continue }
         $img = [string]$p.ImagePath
         if ($pathRx -and $pathRx.IsMatch($img)) { $hit = '流氓内核驱动(特征库匹配)'; $conf = 'High' }
@@ -107,8 +107,8 @@ function Find-FWRogueUninstall {
     )
     $out = @()
     foreach ($r in $roots) {
-        foreach ($k in (Get-ChildItem $r -ErrorAction SilentlyContinue)) {
-            $p = Get-ItemProperty $k.PSPath -ErrorAction SilentlyContinue
+        foreach ($k in (Get-ChildItem -LiteralPath $r -ErrorAction SilentlyContinue)) {
+            $p = Get-ItemProperty -LiteralPath $k.PSPath -ErrorAction SilentlyContinue
             if (-not $p.DisplayName) { continue }
             $hit = $null; $conf = $null
             if ($pubRx -and $p.Publisher -and $pubRx.IsMatch([string]$p.Publisher)) { $hit = "发布者匹配特征库($($p.Publisher))"; $conf = 'High' }
@@ -133,11 +133,12 @@ function Find-FWRogueStartup {
         'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run'
     )
     $out = @()
+    $psProps = @('PSPath', 'PSParentPath', 'PSChildName', 'PSDrive', 'PSProvider')
     foreach ($rk in $runKeys) {
-        $props = Get-ItemProperty $rk -ErrorAction SilentlyContinue
+        $props = Get-ItemProperty -LiteralPath $rk -ErrorAction SilentlyContinue
         if (-not $props) { continue }
         foreach ($prop in @($props.PSObject.Properties)) {
-            if ($prop.Name -match '^PS') { continue }
+            if ($psProps -contains $prop.Name) { continue }
             $v = [string]$prop.Value
             $hit = $null; $conf = $null
             if ($pathRx -and $pathRx.IsMatch($v)) { $hit = '自启动项指向流氓路径'; $conf = 'High' }
@@ -153,7 +154,7 @@ function Find-FWRogueStartup {
         (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\StartUp')
     )
     foreach ($dir in $startupDirs) {
-        foreach ($lnk in (Get-ChildItem $dir -Filter *.lnk -ErrorAction SilentlyContinue)) {
+        foreach ($lnk in (Get-ChildItem -LiteralPath $dir -Filter *.lnk -ErrorAction SilentlyContinue)) {
             try {
                 $l = $sh.CreateShortcut($lnk.FullName)
                 $t = "$($l.TargetPath) $($l.Arguments)"
@@ -176,9 +177,12 @@ function Find-FWRogueDirectories {
         '{ProgramData}'    = $env:ProgramData
     }
     foreach ($d in $SigDb.RogueDirectories) {
-        $resolved = $d
-        foreach ($k in $placeholders.Keys) { $resolved = $resolved.Replace($k, $placeholders[$k]) }
-        if (Test-Path $resolved) {
+        if ([string]::IsNullOrWhiteSpace($d)) { continue }
+        $resolved = [string]$d
+        foreach ($k in $placeholders.Keys) {
+            if ($null -ne $placeholders[$k]) { $resolved = $resolved.Replace($k, [string]$placeholders[$k]) }
+        }
+        if (Test-Path -LiteralPath $resolved -PathType Container) {
             $out += New-FWFinding '目录' $resolved $resolved '特征库已知流氓目录' 'High' $resolved
         }
     }
@@ -190,7 +194,7 @@ function Find-FWTempResidue {
     $rx = Get-FWPatternRegex $SigDb.TempResiduePatterns
     $out = @()
     if (-not $rx) { return $out }
-    foreach ($d in (Get-ChildItem $env:TEMP -Directory -ErrorAction SilentlyContinue)) {
+    foreach ($d in (Get-ChildItem -LiteralPath $env:TEMP -Directory -ErrorAction SilentlyContinue)) {
         if ($rx.IsMatch($d.Name)) {
             $out += New-FWFinding 'Temp残留' $d.Name $d.FullName 'Temp 目录中的流氓残留' 'High' $d.FullName
         }

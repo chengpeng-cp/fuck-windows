@@ -9,7 +9,7 @@
   清理前自动备份注册表到 backup 目录，可运行 restore.ps1 恢复。
 
 .PARAMETER ScanOnly
-  只扫描并输出报告，不做任何更改。
+  只扫描并输出报告，不做任何系统更改。
 
 .PARAMETER Auto
   无人值守模式，跳过确认提示（仍只清理 High 置信项）。
@@ -42,7 +42,17 @@ $Root = $PSScriptRoot
 if (-not $Root) { $Root = Split-Path -Parent $MyInvocation.MyCommand.Path }
 
 foreach ($m in 'Common', 'Scanner', 'Terminator', 'Purger', 'Hardener') {
-    Import-Module (Join-Path $Root "lib\$m.psm1") -Force -DisableNameChecking
+    $modulePath = Join-Path $Root "lib\$m.psm1"
+    if (-not (Test-Path -LiteralPath $modulePath)) {
+        Write-Host ("缺少模块文件: {0}" -f $modulePath) -ForegroundColor Red
+        exit 1
+    }
+    try {
+        Import-Module $modulePath -Force -DisableNameChecking -ErrorAction Stop
+    } catch {
+        Write-Host ("导入模块失败: {0} - {1}" -f $modulePath, $_.Exception.Message) -ForegroundColor Red
+        exit 1
+    }
 }
 
 # ---------- 自提权（ScanOnly 纯读操作可免提权运行） ----------
@@ -51,13 +61,23 @@ if (-not (Test-FWAdmin)) {
         Write-Host '提示: 当前非管理员权限，部分位置可能读取不全；清理操作仍需提权。' -ForegroundColor DarkYellow
     } else {
         Write-Host '需要管理员权限，正在请求 UAC 提权...' -ForegroundColor Yellow
-        Invoke-FWSelfElevation -Params $PSBoundParameters -ScriptPath $PSCommandPath -KeepWindow:(-not $Auto)
+        try {
+            Invoke-FWSelfElevation -Params $PSBoundParameters -ScriptPath $PSCommandPath -KeepWindow:(-not $Auto)
+        } catch {
+            Write-Host ("提权失败或被取消: {0}" -f $_.Exception.Message) -ForegroundColor Red
+            exit 1
+        }
         exit
     }
 }
 
 Initialize-FWEnvironment $Root
-$db = Import-PowerShellDataFile (Join-Path $Root 'signatures.psd1')
+try {
+    $db = Import-PowerShellDataFile (Join-Path $Root 'signatures.psd1')
+} catch {
+    Write-Host ("读取特征库失败: {0}" -f $_.Exception.Message) -ForegroundColor Red
+    exit 1
+}
 
 Write-Host ''
 Write-Host '  ███████╗██╗   ██╗██╗  ██╗    ██████╗ ██╗███████╗' -ForegroundColor Cyan
@@ -71,7 +91,7 @@ Write-Host ''
 
 # ---------- 扫描 ----------
 Write-Log '========== 第 1 步：全面扫描 ==========' 'STEP'
-$findings = Get-FWScanResult -SigDb $db
+$findings = @(Get-FWScanResult -SigDb $db)
 $high = @($findings | Where-Object Confidence -eq 'High')
 $medium = @($findings | Where-Object Confidence -eq 'Medium')
 
@@ -88,7 +108,8 @@ if ($findings.Count -gt 0) {
 }
 Write-Log ("扫描完成: High {0} 项, Medium {1} 项" -f $high.Count, $medium.Count) 'INFO'
 $logAll = $findings | ForEach-Object { "[{0}] {1} | {2} | {3} | {4}" -f $_.Confidence, $_.Category, $_.Name, $_.Path, $_.Reason }
-if ($script:FWLogPath) { $logAll | Out-File $script:FWLogPath -Append -Encoding UTF8 }
+$logPath = Get-FWLogPath
+if ($logPath) { $logAll | Add-Content -LiteralPath $logPath -Encoding UTF8 }
 
 if ($findings.Count -eq 0) {
     Write-Log '未发现流氓软件，系统很干净！' 'OK'
@@ -110,10 +131,10 @@ if ($Auto) {
     Write-Log ("Auto 模式: 将清理 {0} 项{1}" -f $cleanSet.Count, $(if ($Aggressive) { '(含可疑项)' } else { '' }))
 } else {
     Write-Host ''
-    Write-Host "确认清理 $(${high}.Count) 项高危(High)条目?" -ForegroundColor Yellow
+    Write-Host "确认清理 $($high.Count) 项高危(High)条目?" -ForegroundColor Yellow
     Write-Host '  Y = 清理高危项    A = 高危+可疑项全部清理    N = 取消' -ForegroundColor Yellow
     $ans = Read-Host '请选择 (Y/A/N)'
-    switch ($ans.ToUpper()) {
+    switch (([string]$ans).Trim().ToUpper()) {
         'Y' { $cleanSet = @($high) }
         'A' { $cleanSet = @($high) + @($medium) }
         default {
@@ -147,7 +168,9 @@ Remove-FWTasks $taskTargets
 
 Write-Log '========== 第 5 步：删除自启动项 ==========' 'STEP'
 $startupTargets = @($cleanSet | Where-Object { $_.Category -eq '自启动' } | ForEach-Object { $_.Target })
-foreach ($t in $startupTargets) { Backup-FWRegistryKey $t.KeyPath | Out-Null }
+foreach ($kp in @($startupTargets | ForEach-Object { $_.KeyPath } | Select-Object -Unique)) {
+    Backup-FWRegistryKey $kp | Out-Null
+}
 Remove-FWStartupValues $startupTargets
 Remove-FWStartupShortcuts @($cleanSet | Where-Object Category -eq '启动文件夹' | ForEach-Object { $_.Target })
 
@@ -181,14 +204,23 @@ if ($Harden) {
 # ---------- 验证 ----------
 Write-Log '========== 第 9 步：清理后验证 ==========' 'STEP'
 $remain = @(Get-FWScanResult -SigDb $db | Where-Object Confidence -eq 'High')
-if ($rebootNeeded) { $remain = @($remain | Where-Object { $locked -notcontains $_.Name }) }
+if ($rebootNeeded) {
+    $lockedSet = @($locked)
+    $remain = @($remain | Where-Object { $lockedSet -notcontains $_.Name -and $lockedSet -notcontains $_.Path })
+}
 Write-Log ("验证结果: 残留高危项 {0} 个{1}" -f $remain.Count, $(if ($rebootNeeded) { '(锁定文件将在重启后自动删除)' } else { '' })) $(if ($remain.Count -eq 0) { 'OK' } else { 'WARN' })
 foreach ($r in $remain) { Write-Log ("  残留: [{0}] {1} ({2})" -f $r.Category, $r.Name, $r.Reason) 'WARN' }
 
 Write-Host ''
 Write-Host '================ 清理完成 ================' -ForegroundColor Green
-Write-Log ("日志: {0}" -f $script:FWLogPath) 'INFO'
-Write-Log ("备份/恢复: {0}" -f (Join-Path (Get-FWBackupDir) 'restore.ps1')) 'INFO'
+$logPath = Get-FWLogPath
+Write-Log ("日志: {0}" -f $(if ($logPath) { $logPath } else { '未启用' })) 'INFO'
+$backupDir = Get-FWBackupDir
+if ($backupDir) {
+    Write-Log ("备份/恢复: {0}" -f (Join-Path $backupDir 'restore.ps1')) 'INFO'
+} else {
+    Write-Log '备份目录不可用，本次未生成注册表备份' 'WARN'
+}
 if ($rebootNeeded) {
     Write-Host ''
     Write-Host '  ※ 检测到被内核驱动锁定的文件，请重启电脑完成最终删除 ※' -ForegroundColor Yellow
