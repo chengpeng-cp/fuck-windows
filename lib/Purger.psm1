@@ -17,15 +17,14 @@ function Test-FWSafeRoguePath {
     if ($p -match '(?i)^[A-Za-z]:\\Windows(\\|$)') { return $false }
     if ($p -match '(?i)\\Windows\\|\\System32\\|\\SysWOW64\\') { return $false }
     if ($p.Length -lt 12) { return $false }
-    $rx = Get-FWPatternRegex $SigDb.RoguePaths
-    if ($rx -and ($rx.IsMatch($p) -or $rx.IsMatch($p + '\'))) { return $true }
+    if (Test-FWPathPattern -Text $p -Patterns $SigDb.RoguePaths) { return $true }
     # Temp 残留：只允许 Temp 目录的直接子目录，且目录名命中特征库
     $tempRoot = $env:TEMP
     if ($tempRoot) {
         $tempRoot = [System.IO.Path]::GetFullPath($tempRoot).TrimEnd('\')
         $parent = [System.IO.Path]::GetDirectoryName($p)
-        $tempRx = Get-FWPatternRegex $SigDb.TempResiduePatterns
-        if ($tempRx -and $parent -and $parent.TrimEnd('\') -eq $tempRoot -and $tempRx.IsMatch([System.IO.Path]::GetFileName($p))) {
+        if ($parent -and $parent.TrimEnd('\') -eq $tempRoot -and
+            (Test-FWExactPattern -Value ([System.IO.Path]::GetFileName($p)) -Patterns $SigDb.TempResiduePatterns)) {
             return $true
         }
     }

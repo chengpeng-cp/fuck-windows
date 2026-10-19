@@ -58,18 +58,20 @@ powershell -ExecutionPolicy Bypass -File .\fuck-windows.ps1 -ScanOnly
 # 2. 交互式清理（会弹出 UAC 提权）
 powershell -ExecutionPolicy Bypass -File .\fuck-windows.ps1
 
-# 3. 一条龙：全自动 + 连可疑项一起清 + 禁用国产软件自启 + 开启 Defender 防护
-powershell -ExecutionPolicy Bypass -File .\fuck-windows.ps1 -Auto -Aggressive -TameAutostart -Harden
+# 3. 无人值守只清理 High 项；请先检查 -ScanOnly 报告
+powershell -ExecutionPolicy Bypass -File .\fuck-windows.ps1 -Auto
 ```
 
 也可以直接双击 `start.bat` 运行。
+
+> `-Auto -Aggressive` 会跳过确认并同时清理 Medium 项。Medium 包含需要用户判断的常见软件；只有核对过 `-ScanOnly` 报告后才使用。`-TameAutostart` 和 `-Harden` 是独立的可选动作。
 
 ## 🎛️ 参数
 
 | 参数 | 说明 |
 |---|---|
 | `-ScanOnly` | 只扫描输出报告，不做任何系统更改；“零改动”不包括本地日志文件 |
-| `-Auto` | 无人值守，跳过确认（仍只清理 High 置信项） |
+| `-Auto` | 无人值守，默认只清理 High 项；同时使用 `-Aggressive` 时也会自动清理 Medium 项 |
 | `-Aggressive` | 连 Medium 置信项（启发式命中 / 常见捆绑软件）一起清理 |
 | `-TameAutostart` | 顺手禁用腾讯视频、百度网盘、夸克网盘等开机自启（仅删 Run 键，可恢复，不卸载） |
 | `-Harden` | 开启 Windows Defender PUA 防护 + 后台快速扫描 |
@@ -124,8 +126,8 @@ powershell -ExecutionPolicy Bypass -File .\fuck-windows.ps1 -Auto -Aggressive -T
 |---|---|---|
 | `RoguePublishers` | Uninstall 表 Publisher | 用公司名，覆盖面最大 |
 | `RogueDisplayNames` | Uninstall 表 DisplayName | 建议 `^` 锚定 |
-| `RogueProcesses` | 进程名 | 必须 `^...$` 锚定（防止误伤 msedgewebview2 之类） |
-| `RoguePaths` | 服务/驱动/任务/启动项的路径 | 必须带目录上下文 `\\` 开头 |
+| `RogueProcesses` | 进程名 | 尽量用 `^...$` 锚定；若有意匹配前缀，需确认同系列进程名并附样本 |
+| `RoguePaths` | 服务/驱动/任务/启动项的路径 | 必须带目录上下文 `\\` 开头；运行时还会校验目录或文件名边界 |
 | `RogueDirectories` | 安装目录 | 用 `{Roaming}` `{Local}` `{ProgramFilesX86}` `{ProgramData}` 占位符 |
 | `SuspiciousDisplayNames` | 常见捆绑软件 | 仅 `-Aggressive` 时清理 |
 
@@ -169,12 +171,22 @@ fuck-windows/
 │   ├── Terminator.psm1  # 杀进程/停服务
 │   ├── Purger.psm1      # 删任务/注册表/文件/重启删除
 │   └── Hardener.psm1    # Defender PUA 加固
+├── tests/
+│   └── Invoke-RegressionTests.ps1 # 无额外依赖的判定逻辑回归验证
 ├── assets/
 │   └── images/vx.png    # 微信二维码
 ├── logs/                # 运行日志（gitignore）
 ├── backup/              # 清理备份（gitignore）
 ├── LICENSE
 └── README.md
+```
+
+## 🧪 开发者回归验证
+
+使用内置 PowerShell 跑路径安全和特征匹配回归用例，不需要安装 Pester，也不会改动系统：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\Invoke-RegressionTests.ps1
 ```
 
 ## 📄 License

@@ -25,7 +25,7 @@ function Find-FWRogueProcesses {
         try { $path = $p.Path } catch {}
         $hit = $null; $conf = $null
         if ($nameRx -and $nameRx.IsMatch($p.Name)) { $hit = '进程名匹配特征库'; $conf = 'High' }
-        elseif ($path -and $pathRx -and $pathRx.IsMatch($path)) { $hit = '进程路径匹配特征库'; $conf = 'High' }
+        elseif ($path -and (Test-FWPathPattern -Text $path -Regex $pathRx)) { $hit = '进程路径匹配特征库'; $conf = 'High' }
         elseif ($popRx.IsMatch($p.Name)) { $hit = '疑似弹窗进程(*_pop 命名)'; $conf = 'Medium' }
         if (-not $hit) { continue }
         if (-not $path) {
@@ -38,8 +38,8 @@ function Find-FWRogueProcesses {
 
 function Find-FWRogueServices {
     param([Parameter(Mandatory)]$SigDb)
-    $pathRx = Get-FWPatternRegex $SigDb.RoguePaths
     $nameRx = Get-FWPatternRegex $SigDb.RogueProcesses
+    $pathRx = Get-FWPatternRegex $SigDb.RoguePaths
     $out = @()
 
     $svchostGroups = $null
@@ -48,7 +48,7 @@ function Find-FWRogueServices {
     foreach ($svc in (Get-CimInstance Win32_Service -ErrorAction SilentlyContinue)) {
         $pn = [string]$svc.PathName
         $hit = $null; $conf = $null
-        if ($pathRx -and $pn -and $pathRx.IsMatch($pn)) { $hit = '服务路径匹配特征库'; $conf = 'High' }
+        if ($pn -and (Test-FWPathPattern -Text $pn -Regex $pathRx)) { $hit = '服务路径匹配特征库'; $conf = 'High' }
         elseif ($nameRx -and $nameRx.IsMatch([string]$svc.Name)) { $hit = '服务名匹配特征库'; $conf = 'High' }
         if (-not $hit -and $pn -match '(?i)svchost\.exe\s+-k\s+([A-Za-z0-9_]+)') {
             $grp = $Matches[1]
@@ -64,7 +64,7 @@ function Find-FWRogueServices {
         $p = Get-ItemProperty -LiteralPath $key.PSPath -ErrorAction SilentlyContinue
         if ($p.Type -ne 1 -or -not $p.ImagePath) { continue }
         $img = [string]$p.ImagePath
-        if ($pathRx -and $pathRx.IsMatch($img)) { $hit = '流氓内核驱动(特征库匹配)'; $conf = 'High' }
+        if (Test-FWPathPattern -Text $img -Regex $pathRx) { $hit = '流氓内核驱动(特征库匹配)'; $conf = 'High' }
         elseif ($img -match '(?i)\\Users\\|\\ProgramData\\' -and $img -notmatch '(?i)\\ProgramData\\Microsoft\\') { $hit = '内核驱动位于用户可写目录'; $conf = 'High' }
         elseif ($img -match '(?i)\\\?\?\\[A-Za-z]:\\(?!Windows\\)') { $hit = '内核驱动位于系统目录外'; $conf = 'Medium' }
         else { continue }
@@ -83,7 +83,7 @@ function Find-FWRogueTasks {
             $cmd = ('{0} {1}' -f $a.Execute, $a.Arguments)
             $exe = [string]$a.Execute
             $hit = $null; $conf = $null
-            if ($pathRx -and $pathRx.IsMatch($cmd)) { $hit = '任务动作匹配特征库'; $conf = 'High' }
+            if (Test-FWPathPattern -Text $cmd -Regex $pathRx) { $hit = '任务动作匹配特征库'; $conf = 'High' }
             elseif ($t.TaskPath -like '\Microsoft\*' -and $exe -match '(?i)\\Users\\|\\ProgramData\\' -and $exe -notmatch '(?i)\\Microsoft\\') { $hit = '任务伪装在 \Microsoft 目录且指向用户可写位置'; $conf = 'High' }
             elseif ($exe -match '(?i)\\Users\\[^\\]+\\AppData\\Local\\Temp\\') { $hit = '任务从 Temp 目录执行程序'; $conf = 'High' }
             elseif ($exe -match '(?i)\\Users\\') { $hit = '任务从用户目录执行(需人工判断)'; $conf = 'Medium' }
@@ -158,7 +158,8 @@ function Find-FWRogueStartup {
             try {
                 $l = $sh.CreateShortcut($lnk.FullName)
                 $t = "$($l.TargetPath) $($l.Arguments)"
-                if ($pathRx -and ($pathRx.IsMatch($t) -or $pathRx.IsMatch($lnk.FullName))) {
+                if ((Test-FWPathPattern -Text $t -Regex $pathRx) -or
+                    (Test-FWPathPattern -Text $lnk.FullName -Regex $pathRx)) {
                     $out += New-FWFinding '启动文件夹' $lnk.Name $t '启动快捷方式指向流氓目标' 'High' $lnk.FullName
                 }
             } catch {}
@@ -191,11 +192,11 @@ function Find-FWRogueDirectories {
 
 function Find-FWTempResidue {
     param([Parameter(Mandatory)]$SigDb)
-    $rx = Get-FWPatternRegex $SigDb.TempResiduePatterns
+    $tempRx = Get-FWExactPatternRegex -Patterns $SigDb.TempResiduePatterns
     $out = @()
-    if (-not $rx) { return $out }
+    if (-not $tempRx) { return $out }
     foreach ($d in (Get-ChildItem -LiteralPath $env:TEMP -Directory -ErrorAction SilentlyContinue)) {
-        if ($rx.IsMatch($d.Name)) {
+        if (Test-FWExactPattern -Value $d.Name -Regex $tempRx) {
             $out += New-FWFinding 'Temp残留' $d.Name $d.FullName 'Temp 目录中的流氓残留' 'High' $d.FullName
         }
     }

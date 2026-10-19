@@ -66,7 +66,7 @@
 
     # 进程名匹配（建议 ^ $ 锚定，避免误伤，如 msedgewebview2）
     RogueProcesses = @(
-        '^datalock'
+        '^datalock$'
         '^securebox_'
         '^filerecycle'
         '^viewedg$'
@@ -101,7 +101,7 @@
     )
 
     # 文件路径 / 服务路径 / 任务动作 匹配
-    # 必须带目录上下文（\\ 开头），防止误伤普通文件名
+    # 必须带目录上下文（\\ 开头）；运行时还会校验组件边界，防止子串误命中
     RoguePaths = @(
         '\\DataLock'
         '\\SecureBox'
@@ -167,7 +167,7 @@
         '{Local}\BirdWallpaper'
     )
 
-    # Temp 目录下的残留文件夹名
+    # Temp 目录下的残留文件夹名（运行时按完整目录名匹配）
     TempResiduePatterns = @(
         'Ludashi'
         'masterwallpaper'

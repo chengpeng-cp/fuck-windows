@@ -12,10 +12,10 @@
   只扫描并输出报告，不做任何系统更改。
 
 .PARAMETER Auto
-  无人值守模式，跳过确认提示（仍只清理 High 置信项）。
+  无人值守模式，跳过确认提示；默认只清理 High 项。若同时指定 -Aggressive，也会自动清理 Medium 项。
 
 .PARAMETER Aggressive
-  连同 Medium 置信项（启发式命中）一起清理，请确认报告内容后使用。
+  连同 Medium 置信项（启发式命中）一起清理。若同时指定 -Auto，会跳过确认并自动清理这些项目。
 
 .PARAMETER TameAutostart
   顺手禁用常见国产软件的开机自启（腾讯视频/百度网盘/夸克网盘等，可恢复，不卸载）。
@@ -26,7 +26,7 @@
 .EXAMPLE
   .\fuck-windows.ps1 -ScanOnly
   .\fuck-windows.ps1
-  .\fuck-windows.ps1 -Auto -Aggressive -TameAutostart -Harden
+  .\fuck-windows.ps1 -Auto
 #>
 param(
     [switch]$ScanOnly,
@@ -150,8 +150,38 @@ if ($cleanSet.Count -eq 0) {
     exit 0
 }
 
-Write-Log ("本次将清理 {0} 项。注册表将备份到 {1}" -f $cleanSet.Count, (Get-FWBackupDir)) 'INFO'
+$registryBackupTargets = @()
+$registryBackupTargets += @($cleanSet | Where-Object { $_.Category -in '服务', '驱动' } | ForEach-Object {
+    "HKLM:\SYSTEM\CurrentControlSet\Services\$($_.Target)"
+})
+$registryBackupTargets += @($cleanSet | Where-Object { $_.Category -eq '自启动' } | ForEach-Object { $_.Target.KeyPath })
+$registryBackupTargets += @($cleanSet | Where-Object { $_.Category -eq '已安装软件' } | ForEach-Object { $_.Target })
+if ($TameAutostart) {
+    $registryBackupTargets += @(
+        'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run',
+        'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run',
+        'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run'
+    )
+}
+
+Write-Log ("本次将清理 {0} 项，正在预先备份相关注册表键..." -f $cleanSet.Count) 'INFO'
+foreach ($keyPath in @($registryBackupTargets | Where-Object { $_ } | Select-Object -Unique)) {
+    if (-not (Test-Path -LiteralPath $keyPath)) { continue }
+    if (-not (Backup-FWRegistryKey -KeyPath $keyPath)) {
+        Write-Log ("无法备份注册表键，已中止清理以保护可恢复性: {0}" -f $keyPath) 'ERR'
+        exit 1
+    }
+}
+$backupDir = Get-FWBackupDir
+if (-not $backupDir) {
+    Write-Log '备份目录不可用，已中止清理。' 'ERR'
+    exit 1
+}
 New-FWRestoreScript
+if (-not (Test-Path -LiteralPath (Join-Path $backupDir 'restore.ps1') -PathType Leaf)) {
+    Write-Log '恢复脚本未能生成，已中止清理。' 'ERR'
+    exit 1
+}
 
 # ---------- 清理 ----------
 Write-Log '========== 第 2 步：停止服务与内核驱动 ==========' 'STEP'
