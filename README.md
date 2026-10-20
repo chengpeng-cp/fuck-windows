@@ -1,4 +1,8 @@
-# fuck-windows
+<p align="center">
+  <img src="assets/images/logo.png" width="160" alt="fuck-windows 项目 Logo">
+</p>
+
+<h1 align="center">fuck-windows</h1>
 
 > Windows 流氓软件 / 弹窗广告 一键清理工具 —— 纯 PowerShell，无依赖，可恢复注册表。
 
@@ -174,7 +178,9 @@ fuck-windows/
 ├── tests/
 │   └── Invoke-RegressionTests.ps1 # 无额外依赖的判定逻辑回归验证
 ├── assets/
-│   └── images/vx.png    # 微信二维码
+│   └── images/
+│       ├── logo.png     # 项目 Logo
+│       └── vx.png       # 微信二维码
 ├── logs/                # 运行日志（gitignore）
 ├── backup/              # 清理备份（gitignore）
 ├── LICENSE
